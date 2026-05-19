@@ -23,13 +23,17 @@
 
 ## 安裝
 
-### 1. 解壓 skills 到 Claude Code 目錄
+### 1. Clone 進 Claude Code skills 目錄
 
 ```bash
-unzip pr-skills.zip -d ~/.claude/skills/
+git clone git@github.com:lb00557193/aie11o-pr.git /tmp/aie11o-pr
+cp -R /tmp/aie11o-pr/pr-{dev,beta,master} ~/.claude/skills/
+rm -rf /tmp/aie11o-pr
 ls ~/.claude/skills/
 # 應該看到 pr-dev/  pr-beta/  pr-master/
 ```
+
+往後 skill 有更新時，重複跑上面的指令即可（會直接覆蓋舊版）。
 
 ### 2. 建立 Atlassian API tokens
 
