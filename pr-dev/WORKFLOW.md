@@ -57,7 +57,9 @@ If the parsed workspace doesn't match
 `~/.aie11o/aie11o.json`'s `bitbucket.workspace`, STOP and tell the user
 the aie11o config is configured for a different workspace.
 
-## 4. Extract Jira ticket
+## 4. Extract Jira ticket and fetch context
+
+### 4a. Extract the ticket key
 
 Regex `[A-Z]+-\d+` (case-sensitive) against:
 
@@ -66,6 +68,48 @@ Regex `[A-Z]+-\d+` (case-sensitive) against:
 3. If still no match, ask the user.
 
 Jira domain: `aiello-eng.atlassian.net` (NOT `aiello.atlassian.net`).
+
+### 4b. Fetch ticket details from Jira (best-effort)
+
+If `~/.aie11o/aie11o.json` has a `jira` section, fetch the ticket's
+summary + description to use as context when generating the PR
+description in step 6. **Failure here is non-fatal** — just skip and
+proceed with diff-only generation.
+
+```bash
+JIRA_EMAIL=$(python3 -c "import json; print(json.load(open('$HOME/.aie11o/aie11o.json'))['jira']['email'])")
+JIRA_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.aie11o/aie11o.json'))['jira']['token'])")
+JIRA_HOST=$(python3 -c "import json; print(json.load(open('$HOME/.aie11o/aie11o.json'))['jira']['host'])")
+
+STATUS=$(curl -s -o /tmp/jira_issue.json -w "%{http_code}" \
+  -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+  -H "Accept: application/json" \
+  "https://$JIRA_HOST/rest/api/3/issue/<TICKET>?fields=summary,description,issuetype,priority,labels,components")
+```
+
+Handling:
+- **200** — parse `summary`, `description` (ADF → plain text by walking
+  `content[].content[].text`), `issuetype.name`, `priority.name`,
+  `labels[]`, `components[].name`. Pass these as context to step 6.
+- **401 / 403** — log "Jira fetch unauthorized — skipping context",
+  continue without it.
+- **404** — log "Jira ticket <TICKET> not found — skipping context",
+  continue.
+- **No `jira` section in config** — silently skip.
+- Any other status — log it, continue.
+
+The PR creation must NOT depend on this fetch succeeding.
+
+### 4c. Plain text in the PR description
+
+In the PR description body, write the ticket as **plain text** (e.g.
+`AOX-5268`) — Bitbucket's Jira integration auto-linkifies it. Do NOT use
+markdown links (`[X](url)`) or HTML anchors (`<a target="_blank">`):
+
+- Markdown links render but open in the same tab.
+- HTML anchors are not parsed — they display as literal text.
+- Bitbucket has no way to force `target="_blank"` from PR description
+  markdown. New-tab is a user-side action (⌘+click / middle-click).
 
 In the PR description, write the ticket as **plain text** (e.g.
 `AOX-5268`) — Bitbucket's Jira integration auto-linkifies it. Do NOT use
@@ -121,9 +165,21 @@ SUBJECT=$(git log -1 --pretty=%s <source>)
 If `SUBJECT` already starts with `[<TICKET>]`, keep verbatim. Otherwise
 title = `[<TICKET>] <SUBJECT>`.
 
-**Description** — generate based on the diff. Follow the `pr_generation`
+**Description** — generate based on the diff **and the Jira ticket
+context fetched in step 4b** (if available). Follow the `pr_generation`
 template structure. **Omit any section that has no real content**
 (don't include empty headers or `<!-- ... -->` placeholders).
+
+Inputs (in priority order):
+1. **Jira ticket summary + description** (from step 4b) — primary source
+   for the **Why** section. The PM-authored context typically explains
+   the business reason / requirement better than what code alone shows.
+2. **Git diff + commit subjects** — primary source for the **How** /
+   **Implement** sections. The code shows what was actually changed.
+3. **Jira issuetype / priority / labels** — light signal for tone
+   (e.g. a Bug ticket → frame Why as "the bug was X").
+
+If step 4b failed (no Jira context), generate from diff + commits only.
 
 Diff context:
 
